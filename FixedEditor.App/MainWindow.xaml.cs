@@ -19,9 +19,11 @@ public sealed partial class MainWindow : Window
 
     private readonly FixedLengthFileService _fileService = new();
     private readonly List<FixedRecord> _records = [];
+    private readonly List<int> _visibleRecordIndexes = [];
     private readonly List<double> _columnLefts = [];
     private readonly List<double> _columnWidths = [];
     private readonly List<FrameworkElement> _headerCells = [];
+    private readonly Dictionary<int, string> _filters = [];
     private FixedFileSchema? _schema;
     private string? _currentFilePath;
     private double _tableWidth;
@@ -49,6 +51,8 @@ public sealed partial class MainWindow : Window
         {
             _schema = FixedFileSchema.Load(path);
             _records.Clear();
+            _visibleRecordIndexes.Clear();
+            _filters.Clear();
             _currentFilePath = null;
             RenderTable();
             SetStatus($"Loaded schema: {Path.GetFileName(path)}");
@@ -76,9 +80,10 @@ public sealed partial class MainWindow : Window
         {
             _records.Clear();
             _records.AddRange(_fileService.Read(path, _schema!));
+            ApplyFilters();
             _currentFilePath = path;
             RenderTable();
-            SetStatus($"Loaded {_records.Count:N0} records from {Path.GetFileName(path)}.");
+            SetLoadedStatus(path);
         }
         catch (Exception ex)
         {
@@ -120,6 +125,7 @@ public sealed partial class MainWindow : Window
 
         var values = Enumerable.Repeat("", _schema!.Fields.Count).ToArray();
         _records.Add(new FixedRecord(_records.Count + 1, values));
+        ApplyFilters();
         RenderTable();
         SetStatus("Added a blank row.");
     }
@@ -148,6 +154,7 @@ public sealed partial class MainWindow : Window
     private void RenderTable()
     {
         CommitActiveCellEdit(true);
+        ApplyFilters();
         ConfigureTableMetrics();
         RenderVisibleTable(true);
     }
@@ -186,7 +193,7 @@ public sealed partial class MainWindow : Window
         }
 
         TableCanvas.Width = _tableWidth;
-        TableCanvas.Height = Math.Max(RowHeight * Math.Max(1, _records.Count + 1), TableScrollViewer.ViewportHeight);
+        TableCanvas.Height = Math.Max(RowHeight * Math.Max(1, _visibleRecordIndexes.Count + 1), TableScrollViewer.ViewportHeight);
     }
 
     private void AddColumnMetric(double width)
@@ -221,14 +228,14 @@ public sealed partial class MainWindow : Window
         for (var fieldIndex = 0; fieldIndex < _schema.Fields.Count; fieldIndex++)
         {
             var field = _schema.Fields[fieldIndex];
-            AddCanvasCell(CreateHeaderCell($"{field.DisplayName} ({field.Length})", HorizontalAlignment.Left), 0, fieldIndex + 1);
+            AddCanvasCell(CreateHeaderCell($"{field.DisplayName} ({field.Length})", fieldIndex), 0, fieldIndex + 1);
         }
 
-        if (_records.Count == 0)
+        if (_visibleRecordIndexes.Count == 0)
         {
             var emptyText = new TextBlock
             {
-                Text = "No records loaded.",
+                Text = _records.Count == 0 ? "No records loaded." : "No records match the active filters.",
                 Margin = new Thickness(8, 12, 0, 0),
                 Foreground = new SolidColorBrush(Colors.Gray)
             };
@@ -241,25 +248,26 @@ public sealed partial class MainWindow : Window
         for (var rowIndex = firstVisibleRow; rowIndex <= lastVisibleRow; rowIndex++)
         {
             var gridRow = rowIndex + 1;
-            AddCanvasCell(CreateRowNumberCell(_records[rowIndex].LineNumber), gridRow, 0);
+            var recordIndex = _visibleRecordIndexes[rowIndex];
+            AddCanvasCell(CreateRowNumberCell(_records[recordIndex].LineNumber), gridRow, 0);
 
             for (var fieldIndex = 0; fieldIndex < _schema.Fields.Count; fieldIndex++)
             {
-                AddCanvasCell(CreateValueCell(rowIndex, fieldIndex), gridRow, fieldIndex + 1);
+                AddCanvasCell(CreateValueCell(recordIndex, fieldIndex), gridRow, fieldIndex + 1);
             }
         }
     }
 
     private (int FirstVisibleRow, int LastVisibleRow) GetVisibleRecordRange()
     {
-        if (_records.Count == 0)
+        if (_visibleRecordIndexes.Count == 0)
         {
             return (-1, -1);
         }
 
         var firstVisibleRow = Math.Max(0, (int)Math.Floor((TableScrollViewer.VerticalOffset - RowHeight) / RowHeight) - RowBuffer);
         var visibleRowCount = (int)Math.Ceiling(TableScrollViewer.ViewportHeight / RowHeight) + RowBuffer * 2 + 1;
-        var lastVisibleRow = Math.Min(_records.Count - 1, firstVisibleRow + visibleRowCount - 1);
+        var lastVisibleRow = Math.Min(_visibleRecordIndexes.Count - 1, firstVisibleRow + visibleRowCount - 1);
         return (firstVisibleRow, lastVisibleRow);
     }
 
@@ -298,6 +306,47 @@ public sealed partial class MainWindow : Window
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center
         };
+        return border;
+    }
+
+    private Border CreateHeaderCell(string text, int fieldIndex)
+    {
+        var border = CreateTableBorder(new SolidColorBrush(Colors.WhiteSmoke));
+        var panel = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                new ColumnDefinition { Width = GridLength.Auto }
+            }
+        };
+
+        var label = new TextBlock
+        {
+            Text = text,
+            Padding = new Thickness(8, 6, 4, 6),
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(label, 0);
+        panel.Children.Add(label);
+
+        var filterButton = new Button
+        {
+            Content = _filters.ContainsKey(fieldIndex) ? "Filter*" : "Filter",
+            Tag = fieldIndex,
+            MinWidth = 54,
+            Height = 28,
+            Padding = new Thickness(6, 0, 6, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 4, 0)
+        };
+        filterButton.Click += HeaderFilterButton_Click;
+        Grid.SetColumn(filterButton, 1);
+        panel.Children.Add(filterButton);
+
+        border.Child = panel;
         return border;
     }
 
@@ -425,10 +474,112 @@ public sealed partial class MainWindow : Window
             if (saveValue)
             {
                 _records[rowIndex].Values[fieldIndex] = editor.Text;
+                ApplyFilters();
             }
 
             cell.Child = CreateValueTextBlock(rowIndex, fieldIndex);
         }
+    }
+
+    private async void HeaderFilterButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_schema is null || sender is not Button { Tag: int fieldIndex })
+        {
+            return;
+        }
+
+        var field = _schema.Fields[fieldIndex];
+        var filterInput = new TextBox
+        {
+            Text = _filters.TryGetValue(fieldIndex, out var currentFilter) ? currentFilter : "",
+            MinWidth = 320,
+            PlaceholderText = "Contains text"
+        };
+
+        var dialog = new ContentDialog
+        {
+            Title = $"Filter: {field.DisplayName}",
+            Content = filterInput,
+            PrimaryButtonText = "Apply",
+            SecondaryButtonText = "Clear",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Content.XamlRoot
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.Primary)
+        {
+            var filter = filterInput.Text.Trim();
+            if (filter.Length == 0)
+            {
+                _filters.Remove(fieldIndex);
+            }
+            else
+            {
+                _filters[fieldIndex] = filter;
+            }
+        }
+        else if (result == ContentDialogResult.Secondary)
+        {
+            _filters.Remove(fieldIndex);
+        }
+        else
+        {
+            return;
+        }
+
+        ApplyFilters();
+        TableScrollViewer.ChangeView(TableScrollViewer.HorizontalOffset, 0, null, true);
+        RenderTable();
+        SetFilterStatus();
+    }
+
+    private void ApplyFilters()
+    {
+        _visibleRecordIndexes.Clear();
+        if (_records.Count == 0)
+        {
+            return;
+        }
+
+        for (var rowIndex = 0; rowIndex < _records.Count; rowIndex++)
+        {
+            if (RecordMatchesFilters(_records[rowIndex]))
+            {
+                _visibleRecordIndexes.Add(rowIndex);
+            }
+        }
+    }
+
+    private bool RecordMatchesFilters(FixedRecord record)
+    {
+        foreach (var (fieldIndex, filter) in _filters)
+        {
+            var value = fieldIndex < record.Values.Length ? record.Values[fieldIndex] : "";
+            if (value.IndexOf(filter, StringComparison.CurrentCultureIgnoreCase) < 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void SetLoadedStatus(string path)
+    {
+        if (_filters.Count == 0)
+        {
+            SetStatus($"Loaded {_records.Count:N0} records from {Path.GetFileName(path)}.");
+            return;
+        }
+
+        SetFilterStatus();
+    }
+
+    private void SetFilterStatus()
+    {
+        SetStatus($"Showing {_visibleRecordIndexes.Count:N0} of {_records.Count:N0} records with {_filters.Count:N0} active filters.");
     }
 
     private static double GetColumnWidth(FixedFieldDefinition field)
