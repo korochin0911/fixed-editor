@@ -27,6 +27,7 @@
             Grid.Row="1"
             HorizontalScrollBarVisibility="Auto"
             VerticalScrollBarVisibility="Auto"
+            SizeChanged="TableScrollViewer_SizeChanged"
             ViewChanged="TableScrollViewer_ViewChanged">
             <Canvas x:Name="TableCanvas" Margin="12" />
         </ScrollViewer>

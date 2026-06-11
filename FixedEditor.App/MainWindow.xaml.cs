@@ -24,6 +24,8 @@ public sealed partial class MainWindow : Window
     private FixedFileSchema? _schema;
     private string? _currentFilePath;
     private double _tableWidth;
+    private int _renderedFirstVisibleRow = -1;
+    private int _renderedLastVisibleRow = -1;
     private Border? _activeCell;
     private TextBox? _activeEditor;
     private (int RowIndex, int FieldIndex) _activePosition;
@@ -146,12 +148,18 @@ public sealed partial class MainWindow : Window
     {
         CommitActiveCellEdit(true);
         ConfigureTableMetrics();
-        RenderVisibleTable();
+        RenderVisibleTable(true);
     }
 
     private void TableScrollViewer_ViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
-        RenderVisibleTable();
+        RenderVisibleTable(false);
+    }
+
+    private void TableScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        ConfigureTableMetrics();
+        RenderVisibleTable(true);
     }
 
     private void ConfigureTableMetrics()
@@ -159,6 +167,8 @@ public sealed partial class MainWindow : Window
         _columnLefts.Clear();
         _columnWidths.Clear();
         _tableWidth = 0;
+        _renderedFirstVisibleRow = -1;
+        _renderedLastVisibleRow = -1;
 
         if (_schema is null)
         {
@@ -185,15 +195,24 @@ public sealed partial class MainWindow : Window
         _tableWidth += width;
     }
 
-    private void RenderVisibleTable()
+    private void RenderVisibleTable(bool force)
     {
-        CommitActiveCellEdit(true);
-        TableCanvas.Children.Clear();
-
         if (_schema is null)
+        {
+            TableCanvas.Children.Clear();
+            return;
+        }
+
+        var (firstVisibleRow, lastVisibleRow) = GetVisibleRecordRange();
+        if (!force && firstVisibleRow == _renderedFirstVisibleRow && lastVisibleRow == _renderedLastVisibleRow)
         {
             return;
         }
+
+        CommitActiveCellEdit(true);
+        TableCanvas.Children.Clear();
+        _renderedFirstVisibleRow = firstVisibleRow;
+        _renderedLastVisibleRow = lastVisibleRow;
 
         AddCanvasCell(CreateHeaderCell("#", HorizontalAlignment.Left), 0, 0);
         for (var fieldIndex = 0; fieldIndex < _schema.Fields.Count; fieldIndex++)
@@ -216,10 +235,6 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var firstVisibleRow = Math.Max(0, (int)Math.Floor((TableScrollViewer.VerticalOffset - RowHeight) / RowHeight) - RowBuffer);
-        var visibleRowCount = (int)Math.Ceiling(TableScrollViewer.ViewportHeight / RowHeight) + RowBuffer * 2 + 1;
-        var lastVisibleRow = Math.Min(_records.Count - 1, firstVisibleRow + visibleRowCount - 1);
-
         for (var rowIndex = firstVisibleRow; rowIndex <= lastVisibleRow; rowIndex++)
         {
             var gridRow = rowIndex + 1;
@@ -230,6 +245,19 @@ public sealed partial class MainWindow : Window
                 AddCanvasCell(CreateValueCell(rowIndex, fieldIndex), gridRow, fieldIndex + 1);
             }
         }
+    }
+
+    private (int FirstVisibleRow, int LastVisibleRow) GetVisibleRecordRange()
+    {
+        if (_records.Count == 0)
+        {
+            return (-1, -1);
+        }
+
+        var firstVisibleRow = Math.Max(0, (int)Math.Floor((TableScrollViewer.VerticalOffset - RowHeight) / RowHeight) - RowBuffer);
+        var visibleRowCount = (int)Math.Ceiling(TableScrollViewer.ViewportHeight / RowHeight) + RowBuffer * 2 + 1;
+        var lastVisibleRow = Math.Min(_records.Count - 1, firstVisibleRow + visibleRowCount - 1);
+        return (firstVisibleRow, lastVisibleRow);
     }
 
     private void AddCanvasCell(FrameworkElement element, int row, int column)
