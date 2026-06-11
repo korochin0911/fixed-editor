@@ -21,6 +21,7 @@ public sealed partial class MainWindow : Window
     private readonly List<FixedRecord> _records = [];
     private readonly List<double> _columnLefts = [];
     private readonly List<double> _columnWidths = [];
+    private readonly List<FrameworkElement> _headerCells = [];
     private FixedFileSchema? _schema;
     private string? _currentFilePath;
     private double _tableWidth;
@@ -206,11 +207,13 @@ public sealed partial class MainWindow : Window
         var (firstVisibleRow, lastVisibleRow) = GetVisibleRecordRange();
         if (!force && firstVisibleRow == _renderedFirstVisibleRow && lastVisibleRow == _renderedLastVisibleRow)
         {
+            UpdateHeaderPosition();
             return;
         }
 
         CommitActiveCellEdit(true);
         TableCanvas.Children.Clear();
+        _headerCells.Clear();
         _renderedFirstVisibleRow = firstVisibleRow;
         _renderedLastVisibleRow = lastVisibleRow;
 
@@ -265,8 +268,22 @@ public sealed partial class MainWindow : Window
         element.Width = _columnWidths[column];
         element.Height = RowHeight;
         Canvas.SetLeft(element, _columnLefts[column]);
-        Canvas.SetTop(element, row * RowHeight);
+        Canvas.SetTop(element, row == 0 ? TableScrollViewer.VerticalOffset : row * RowHeight);
+        Canvas.SetZIndex(element, row == 0 ? 1 : 0);
+        if (row == 0)
+        {
+            _headerCells.Add(element);
+        }
+
         TableCanvas.Children.Add(element);
+    }
+
+    private void UpdateHeaderPosition()
+    {
+        foreach (var headerCell in _headerCells)
+        {
+            Canvas.SetTop(headerCell, TableScrollViewer.VerticalOffset);
+        }
     }
 
     private Border CreateHeaderCell(string text, HorizontalAlignment alignment)

@@ -29,7 +29,7 @@
             VerticalScrollBarVisibility="Auto"
             SizeChanged="TableScrollViewer_SizeChanged"
             ViewChanged="TableScrollViewer_ViewChanged">
-            <Canvas x:Name="TableCanvas" Margin="12" />
+            <Canvas x:Name="TableCanvas" />
         </ScrollViewer>
 
         <Border Grid.Row="2" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,0" Padding="12,8">
