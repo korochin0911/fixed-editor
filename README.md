@@ -32,3 +32,28 @@ The app reads a JSON schema before opening a data file.
 ```
 
 `recordSeparator` can be empty, `none`, `lf`, or `crlf`.
+
+One schema JSON can also contain multiple file definitions:
+
+```json
+{
+  "files": [
+    {
+      "name": "Customers",
+      "filePattern": "customer.*",
+      "recordLength": 38,
+      "encoding": "shift_jis",
+      "recordSeparator": "lf",
+      "fields": []
+    },
+    {
+      "name": "Products",
+      "fileName": "products.dat",
+      "recordLength": 80,
+      "fields": []
+    }
+  ]
+}
+```
+
+When multiple definitions are loaded, FixedEditor picks a matching `fileName` or `filePattern`; otherwise it asks which schema to use.

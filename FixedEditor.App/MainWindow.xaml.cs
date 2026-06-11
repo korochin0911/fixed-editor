@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using System.Text.RegularExpressions;
 using Windows.Storage.Pickers;
 using Windows.System;
 using WinRT.Interop;
@@ -18,6 +19,7 @@ public sealed partial class MainWindow : Window
     private const int RowBuffer = 4;
 
     private readonly FixedLengthFileService _fileService = new();
+    private readonly List<FixedFileSchema> _schemas = [];
     private readonly List<FixedRecord> _records = [];
     private readonly List<int> _visibleRecordIndexes = [];
     private readonly List<double> _columnLefts = [];
@@ -48,13 +50,17 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            _schema = FixedFileSchema.Load(path);
+            _schemas.Clear();
+            _schemas.AddRange(FixedFileSchema.LoadAll(path));
+            _schema = _schemas.Count == 1 ? _schemas[0] : null;
             _records.Clear();
             _visibleRecordIndexes.Clear();
             _filters.Clear();
             _currentFilePath = null;
             RenderTable();
-            SetStatus($"Loaded schema: {Path.GetFileName(path)}");
+            SetStatus(_schemas.Count == 1
+                ? $"Loaded schema: {GetSchemaDisplayName(_schemas[0])}."
+                : $"Loaded {_schemas.Count:N0} schemas from {Path.GetFileName(path)}.");
         }
         catch (Exception ex)
         {
@@ -77,6 +83,14 @@ public sealed partial class MainWindow : Window
 
         try
         {
+            var schema = await ResolveSchemaForFileAsync(path);
+            if (schema is null)
+            {
+                return;
+            }
+
+            _schema = schema;
+            _filters.Clear();
             _records.Clear();
             _records.AddRange(_fileService.Read(path, _schema!));
             ApplyFilters();
@@ -92,7 +106,7 @@ public sealed partial class MainWindow : Window
 
     private async void SaveAsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureSchema())
+        if (!EnsureActiveSchema())
         {
             return;
         }
@@ -117,7 +131,7 @@ public sealed partial class MainWindow : Window
 
     private void AddRowButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureSchema())
+        if (!EnsureActiveSchema())
         {
             return;
         }
@@ -131,7 +145,7 @@ public sealed partial class MainWindow : Window
 
     private async void ValidateButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!EnsureSchema())
+        if (!EnsureActiveSchema())
         {
             return;
         }
@@ -663,13 +677,109 @@ public sealed partial class MainWindow : Window
 
     private bool EnsureSchema()
     {
-        if (_schema is not null)
+        if (_schemas.Count > 0)
         {
             return true;
         }
 
         SetStatus("Load a schema before opening, editing, or saving data.");
         return false;
+    }
+
+    private bool EnsureActiveSchema()
+    {
+        if (_schema is not null)
+        {
+            return true;
+        }
+
+        SetStatus("Open a data file to select a schema before editing or saving.");
+        return false;
+    }
+
+    private async Task<FixedFileSchema?> ResolveSchemaForFileAsync(string dataPath)
+    {
+        if (_schemas.Count == 1)
+        {
+            return _schemas[0];
+        }
+
+        var matches = _schemas
+            .Where(schema => SchemaMatchesFile(schema, dataPath))
+            .ToArray();
+
+        return matches.Length == 1
+            ? matches[0]
+            : await SelectSchemaAsync(matches.Length > 1 ? matches : _schemas, Path.GetFileName(dataPath));
+    }
+
+    private async Task<FixedFileSchema?> SelectSchemaAsync(IReadOnlyList<FixedFileSchema> schemas, string fileName)
+    {
+        var comboBox = new ComboBox
+        {
+            MinWidth = 360
+        };
+
+        foreach (var schema in schemas)
+        {
+            comboBox.Items.Add(GetSchemaDisplayName(schema));
+        }
+
+        comboBox.SelectedIndex = 0;
+
+        var dialog = new ContentDialog
+        {
+            Title = $"Select schema for {fileName}",
+            Content = comboBox,
+            PrimaryButtonText = "Open",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Content.XamlRoot
+        };
+
+        var result = await dialog.ShowAsync();
+        return result == ContentDialogResult.Primary && comboBox.SelectedIndex >= 0
+            ? schemas[comboBox.SelectedIndex]
+            : null;
+    }
+
+    private static bool SchemaMatchesFile(FixedFileSchema schema, string path)
+    {
+        var fileName = Path.GetFileName(path);
+        if (!string.IsNullOrWhiteSpace(schema.FileName) &&
+            string.Equals(fileName, schema.FileName, StringComparison.CurrentCultureIgnoreCase))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(schema.FilePattern) &&
+            WildcardMatches(fileName, schema.FilePattern);
+    }
+
+    private static bool WildcardMatches(string value, string pattern)
+    {
+        var regex = "^" + Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+        return Regex.IsMatch(value, regex, RegexOptions.IgnoreCase);
+    }
+
+    private static string GetSchemaDisplayName(FixedFileSchema schema)
+    {
+        if (!string.IsNullOrWhiteSpace(schema.Name))
+        {
+            return schema.Name;
+        }
+
+        if (!string.IsNullOrWhiteSpace(schema.FileName))
+        {
+            return schema.FileName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(schema.FilePattern))
+        {
+            return schema.FilePattern;
+        }
+
+        return $"Record length {schema.RecordLength:N0}";
     }
 
     private async Task<string?> PickOpenFileAsync(string name, params string[] extensions)
