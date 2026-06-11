@@ -22,8 +22,13 @@
             <AppBarButton x:Name="ValidateButton" Style="{StaticResource MainCommandBarButtonStyle}" Icon="Accept" Label="Validate" Click="ValidateButton_Click" />
         </CommandBar>
 
-        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-            <Grid x:Name="TableGrid" Margin="12" />
+        <ScrollViewer
+            x:Name="TableScrollViewer"
+            Grid.Row="1"
+            HorizontalScrollBarVisibility="Auto"
+            VerticalScrollBarVisibility="Auto"
+            ViewChanged="TableScrollViewer_ViewChanged">
+            <Canvas x:Name="TableCanvas" Margin="12" />
         </ScrollViewer>
 
         <Border Grid.Row="2" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,0" Padding="12,8">

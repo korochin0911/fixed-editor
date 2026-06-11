@@ -13,10 +13,17 @@ namespace FixedEditor.App;
 
 public sealed partial class MainWindow : Window
 {
+    private const double RowHeight = 34.0;
+    private const double RowNumberColumnWidth = 64.0;
+    private const int RowBuffer = 4;
+
     private readonly FixedLengthFileService _fileService = new();
     private readonly List<FixedRecord> _records = [];
+    private readonly List<double> _columnLefts = [];
+    private readonly List<double> _columnWidths = [];
     private FixedFileSchema? _schema;
     private string? _currentFilePath;
+    private double _tableWidth;
     private Border? _activeCell;
     private TextBox? _activeEditor;
     private (int RowIndex, int FieldIndex) _activePosition;
@@ -138,63 +145,100 @@ public sealed partial class MainWindow : Window
     private void RenderTable()
     {
         CommitActiveCellEdit(true);
-        TableGrid.Children.Clear();
-        TableGrid.ColumnDefinitions.Clear();
-        TableGrid.RowDefinitions.Clear();
+        ConfigureTableMetrics();
+        RenderVisibleTable();
+    }
+
+    private void TableScrollViewer_ViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        RenderVisibleTable();
+    }
+
+    private void ConfigureTableMetrics()
+    {
+        _columnLefts.Clear();
+        _columnWidths.Clear();
+        _tableWidth = 0;
+
+        if (_schema is null)
+        {
+            TableCanvas.Children.Clear();
+            TableCanvas.Width = 0;
+            TableCanvas.Height = 0;
+            return;
+        }
+
+        AddColumnMetric(RowNumberColumnWidth);
+        foreach (var field in _schema.Fields)
+        {
+            AddColumnMetric(GetColumnWidth(field));
+        }
+
+        TableCanvas.Width = _tableWidth;
+        TableCanvas.Height = Math.Max(RowHeight * Math.Max(1, _records.Count + 1), TableScrollViewer.ViewportHeight);
+    }
+
+    private void AddColumnMetric(double width)
+    {
+        _columnLefts.Add(_tableWidth);
+        _columnWidths.Add(width);
+        _tableWidth += width;
+    }
+
+    private void RenderVisibleTable()
+    {
+        CommitActiveCellEdit(true);
+        TableCanvas.Children.Clear();
 
         if (_schema is null)
         {
             return;
         }
 
-        TableGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
-        foreach (var field in _schema.Fields)
-        {
-            TableGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(GetColumnWidth(field)) });
-        }
-
-        TableGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        AddTableCell(CreateHeaderCell("#", HorizontalAlignment.Left), 0, 0);
+        AddCanvasCell(CreateHeaderCell("#", HorizontalAlignment.Left), 0, 0);
         for (var fieldIndex = 0; fieldIndex < _schema.Fields.Count; fieldIndex++)
         {
             var field = _schema.Fields[fieldIndex];
-            AddTableCell(CreateHeaderCell($"{field.DisplayName} ({field.Length})", HorizontalAlignment.Left), 0, fieldIndex + 1);
+            AddCanvasCell(CreateHeaderCell($"{field.DisplayName} ({field.Length})", HorizontalAlignment.Left), 0, fieldIndex + 1);
         }
 
         if (_records.Count == 0)
         {
-            TableGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var emptyText = new TextBlock
             {
                 Text = "No records loaded.",
                 Margin = new Thickness(8, 12, 0, 0),
                 Foreground = new SolidColorBrush(Colors.Gray)
             };
-            Grid.SetRow(emptyText, 1);
-            Grid.SetColumn(emptyText, 0);
-            Grid.SetColumnSpan(emptyText, Math.Max(1, _schema.Fields.Count + 1));
-            TableGrid.Children.Add(emptyText);
+            Canvas.SetLeft(emptyText, 0);
+            Canvas.SetTop(emptyText, RowHeight);
+            TableCanvas.Children.Add(emptyText);
             return;
         }
 
-        for (var rowIndex = 0; rowIndex < _records.Count; rowIndex++)
+        var firstVisibleRow = Math.Max(0, (int)Math.Floor((TableScrollViewer.VerticalOffset - RowHeight) / RowHeight) - RowBuffer);
+        var visibleRowCount = (int)Math.Ceiling(TableScrollViewer.ViewportHeight / RowHeight) + RowBuffer * 2 + 1;
+        var lastVisibleRow = Math.Min(_records.Count - 1, firstVisibleRow + visibleRowCount - 1);
+
+        for (var rowIndex = firstVisibleRow; rowIndex <= lastVisibleRow; rowIndex++)
         {
             var gridRow = rowIndex + 1;
-            TableGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            AddTableCell(CreateRowNumberCell(_records[rowIndex].LineNumber), gridRow, 0);
+            AddCanvasCell(CreateRowNumberCell(_records[rowIndex].LineNumber), gridRow, 0);
 
             for (var fieldIndex = 0; fieldIndex < _schema.Fields.Count; fieldIndex++)
             {
-                AddTableCell(CreateValueCell(rowIndex, fieldIndex), gridRow, fieldIndex + 1);
+                AddCanvasCell(CreateValueCell(rowIndex, fieldIndex), gridRow, fieldIndex + 1);
             }
         }
     }
 
-    private void AddTableCell(FrameworkElement element, int row, int column)
+    private void AddCanvasCell(FrameworkElement element, int row, int column)
     {
-        Grid.SetRow(element, row);
-        Grid.SetColumn(element, column);
-        TableGrid.Children.Add(element);
+        element.Width = _columnWidths[column];
+        element.Height = RowHeight;
+        Canvas.SetLeft(element, _columnLefts[column]);
+        Canvas.SetTop(element, row * RowHeight);
+        TableCanvas.Children.Add(element);
     }
 
     private Border CreateHeaderCell(string text, HorizontalAlignment alignment)
@@ -256,7 +300,7 @@ public sealed partial class MainWindow : Window
             Background = background,
             BorderBrush = new SolidColorBrush(Colors.LightGray),
             BorderThickness = new Thickness(0, 0, 1, 1),
-            MinHeight = 34
+            MinHeight = RowHeight
         };
     }
 
