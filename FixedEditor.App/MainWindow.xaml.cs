@@ -22,7 +22,6 @@ public sealed partial class MainWindow : Window
     private readonly List<int> _visibleRecordIndexes = [];
     private readonly List<double> _columnLefts = [];
     private readonly List<double> _columnWidths = [];
-    private readonly List<FrameworkElement> _headerCells = [];
     private readonly Dictionary<int, string> _filters = [];
     private FixedFileSchema? _schema;
     private string? _currentFilePath;
@@ -156,11 +155,13 @@ public sealed partial class MainWindow : Window
         CommitActiveCellEdit(true);
         ApplyFilters();
         ConfigureTableMetrics();
+        RenderHeader();
         RenderVisibleTable(true);
     }
 
     private void TableScrollViewer_ViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
+        HeaderScrollViewer.ChangeView(TableScrollViewer.HorizontalOffset, null, null, true);
         RenderVisibleTable(false);
     }
 
@@ -181,8 +182,10 @@ public sealed partial class MainWindow : Window
         if (_schema is null)
         {
             TableCanvas.Children.Clear();
+            HeaderCanvas.Children.Clear();
             TableCanvas.Width = 0;
             TableCanvas.Height = 0;
+            HeaderCanvas.Width = 0;
             return;
         }
 
@@ -193,7 +196,8 @@ public sealed partial class MainWindow : Window
         }
 
         TableCanvas.Width = _tableWidth;
-        TableCanvas.Height = Math.Max(RowHeight * Math.Max(1, _visibleRecordIndexes.Count + 1), TableScrollViewer.ViewportHeight);
+        HeaderCanvas.Width = _tableWidth;
+        TableCanvas.Height = Math.Max(RowHeight * Math.Max(1, _visibleRecordIndexes.Count), TableScrollViewer.ViewportHeight);
     }
 
     private void AddColumnMetric(double width)
@@ -214,22 +218,13 @@ public sealed partial class MainWindow : Window
         var (firstVisibleRow, lastVisibleRow) = GetVisibleRecordRange();
         if (!force && firstVisibleRow == _renderedFirstVisibleRow && lastVisibleRow == _renderedLastVisibleRow)
         {
-            UpdateHeaderPosition();
             return;
         }
 
         CommitActiveCellEdit(true);
         TableCanvas.Children.Clear();
-        _headerCells.Clear();
         _renderedFirstVisibleRow = firstVisibleRow;
         _renderedLastVisibleRow = lastVisibleRow;
-
-        AddCanvasCell(CreateHeaderCell("#", HorizontalAlignment.Left), 0, 0);
-        for (var fieldIndex = 0; fieldIndex < _schema.Fields.Count; fieldIndex++)
-        {
-            var field = _schema.Fields[fieldIndex];
-            AddCanvasCell(CreateHeaderCell($"{field.DisplayName} ({field.Length})", fieldIndex), 0, fieldIndex + 1);
-        }
 
         if (_visibleRecordIndexes.Count == 0)
         {
@@ -240,14 +235,14 @@ public sealed partial class MainWindow : Window
                 Foreground = new SolidColorBrush(Colors.Gray)
             };
             Canvas.SetLeft(emptyText, 0);
-            Canvas.SetTop(emptyText, RowHeight);
+            Canvas.SetTop(emptyText, 12);
             TableCanvas.Children.Add(emptyText);
             return;
         }
 
         for (var rowIndex = firstVisibleRow; rowIndex <= lastVisibleRow; rowIndex++)
         {
-            var gridRow = rowIndex + 1;
+            var gridRow = rowIndex;
             var recordIndex = _visibleRecordIndexes[rowIndex];
             AddCanvasCell(CreateRowNumberCell(_records[recordIndex].LineNumber), gridRow, 0);
 
@@ -265,10 +260,35 @@ public sealed partial class MainWindow : Window
             return (-1, -1);
         }
 
-        var firstVisibleRow = Math.Max(0, (int)Math.Floor((TableScrollViewer.VerticalOffset - RowHeight) / RowHeight) - RowBuffer);
+        var firstVisibleRow = Math.Max(0, (int)Math.Floor(TableScrollViewer.VerticalOffset / RowHeight) - RowBuffer);
         var visibleRowCount = (int)Math.Ceiling(TableScrollViewer.ViewportHeight / RowHeight) + RowBuffer * 2 + 1;
         var lastVisibleRow = Math.Min(_visibleRecordIndexes.Count - 1, firstVisibleRow + visibleRowCount - 1);
         return (firstVisibleRow, lastVisibleRow);
+    }
+
+    private void RenderHeader()
+    {
+        HeaderCanvas.Children.Clear();
+        if (_schema is null)
+        {
+            return;
+        }
+
+        AddHeaderCell(CreateHeaderCell("#", HorizontalAlignment.Left), 0);
+        for (var fieldIndex = 0; fieldIndex < _schema.Fields.Count; fieldIndex++)
+        {
+            var field = _schema.Fields[fieldIndex];
+            AddHeaderCell(CreateHeaderCell($"{field.DisplayName} ({field.Length})", fieldIndex), fieldIndex + 1);
+        }
+    }
+
+    private void AddHeaderCell(FrameworkElement element, int column)
+    {
+        element.Width = _columnWidths[column];
+        element.Height = RowHeight;
+        Canvas.SetLeft(element, _columnLefts[column]);
+        Canvas.SetTop(element, 0);
+        HeaderCanvas.Children.Add(element);
     }
 
     private void AddCanvasCell(FrameworkElement element, int row, int column)
@@ -276,22 +296,8 @@ public sealed partial class MainWindow : Window
         element.Width = _columnWidths[column];
         element.Height = RowHeight;
         Canvas.SetLeft(element, _columnLefts[column]);
-        Canvas.SetTop(element, row == 0 ? TableScrollViewer.VerticalOffset : row * RowHeight);
-        Canvas.SetZIndex(element, row == 0 ? 1 : 0);
-        if (row == 0)
-        {
-            _headerCells.Add(element);
-        }
-
+        Canvas.SetTop(element, row * RowHeight);
         TableCanvas.Children.Add(element);
-    }
-
-    private void UpdateHeaderPosition()
-    {
-        foreach (var headerCell in _headerCells)
-        {
-            Canvas.SetTop(headerCell, TableScrollViewer.VerticalOffset);
-        }
     }
 
     private Border CreateHeaderCell(string text, HorizontalAlignment alignment)
