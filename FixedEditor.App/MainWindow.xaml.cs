@@ -340,9 +340,9 @@ public sealed partial class MainWindow : Window
 
         var filterButton = new Button
         {
-            Content = _filters.ContainsKey(fieldIndex) ? "Filter*" : "Filter",
+            Content = _filters.ContainsKey(fieldIndex) ? "●▽" : "▽",
             Tag = fieldIndex,
-            MinWidth = 54,
+            MinWidth = 32,
             Height = 28,
             Padding = new Thickness(6, 0, 6, 0),
             VerticalAlignment = VerticalAlignment.Center,
