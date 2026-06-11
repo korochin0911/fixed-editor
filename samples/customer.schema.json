@@ -1,0 +1,12 @@
+{
+  "recordLength": 38,
+  "encoding": "shift_jis",
+  "recordSeparator": "lf",
+  "trimTrailingNewLine": true,
+  "fields": [
+    { "name": "customerCode", "label": "Customer Code", "start": 1, "length": 10, "type": "string", "required": true },
+    { "name": "name", "label": "Name", "start": 11, "length": 16, "type": "string", "required": true },
+    { "name": "amount", "label": "Amount", "start": 27, "length": 6, "type": "number" },
+    { "name": "date", "label": "Date", "start": 33, "length": 6, "type": "date", "format": "yyMMdd" }
+  ]
+}

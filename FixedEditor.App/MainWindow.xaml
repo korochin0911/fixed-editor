@@ -1,0 +1,40 @@
+<Window
+    x:Class="FixedEditor.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="FixedEditor">
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" RowDefinitions="Auto,*,Auto">
+        <Grid.Resources>
+            <Style x:Key="MainCommandBarButtonStyle" TargetType="AppBarButton">
+                <Setter Property="Height" Value="40" />
+                <Setter Property="MinHeight" Value="40" />
+                <Setter Property="Padding" Value="10,0" />
+                <Setter Property="VerticalAlignment" Value="Stretch" />
+            </Style>
+        </Grid.Resources>
+
+        <CommandBar Grid.Row="0" DefaultLabelPosition="Right" Height="40" MinHeight="40" Padding="0" IsOpen="False">
+            <AppBarButton x:Name="LoadSchemaButton" Style="{StaticResource MainCommandBarButtonStyle}" Icon="Page" Label="Load schema" Click="LoadSchemaButton_Click" />
+            <AppBarButton x:Name="OpenFileButton" Style="{StaticResource MainCommandBarButtonStyle}" Icon="OpenFile" Label="Open file" Click="OpenFileButton_Click" />
+            <AppBarButton x:Name="SaveAsButton" Style="{StaticResource MainCommandBarButtonStyle}" Icon="Save" Label="Save as" Click="SaveAsButton_Click" />
+            <AppBarSeparator Height="24" VerticalAlignment="Center" />
+            <AppBarButton x:Name="AddRowButton" Style="{StaticResource MainCommandBarButtonStyle}" Icon="Add" Label="Add row" Click="AddRowButton_Click" />
+            <AppBarButton x:Name="ValidateButton" Style="{StaticResource MainCommandBarButtonStyle}" Icon="Accept" Label="Validate" Click="ValidateButton_Click" />
+        </CommandBar>
+
+        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+            <Grid x:Name="TableGrid" Margin="12" />
+        </ScrollViewer>
+
+        <Border Grid.Row="2" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,0" Padding="12,8">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <TextBlock x:Name="StatusText" Text="Load a schema to begin." TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Button x:Name="PreviousPageButton" Content="Previous" MinWidth="86" Click="PreviousPageButton_Click" IsEnabled="False" />
+                    <TextBlock x:Name="PageStatusText" Text="" MinWidth="120" TextAlignment="Center" VerticalAlignment="Center" />
+                    <Button x:Name="NextPageButton" Content="Next" MinWidth="86" Click="NextPageButton_Click" IsEnabled="False" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

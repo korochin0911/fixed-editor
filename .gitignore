@@ -1,0 +1,9 @@
+bin/
+obj/
+.vs/
+.vscode/
+data/
+Document/
+*.user
+*.suo
+*.rsuser

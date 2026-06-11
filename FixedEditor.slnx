@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="FixedEditor.App/FixedEditor.App.csproj" />
+  <Project Path="FixedEditor.Core/FixedEditor.Core.csproj" />
+</Solution>
