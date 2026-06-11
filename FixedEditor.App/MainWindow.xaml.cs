@@ -22,7 +22,7 @@ public sealed partial class MainWindow : Window
     private readonly List<int> _visibleRecordIndexes = [];
     private readonly List<double> _columnLefts = [];
     private readonly List<double> _columnWidths = [];
-    private readonly Dictionary<int, string> _filters = [];
+    private readonly Dictionary<int, HashSet<string>> _filters = [];
     private FixedFileSchema? _schema;
     private string? _currentFilePath;
     private double _tableWidth;
@@ -495,17 +495,67 @@ public sealed partial class MainWindow : Window
         }
 
         var field = _schema.Fields[fieldIndex];
-        var filterInput = new TextBox
+        var values = GetDistinctFieldValues(fieldIndex);
+        var selectedValues = _filters.TryGetValue(fieldIndex, out var currentFilter)
+            ? new HashSet<string>(currentFilter)
+            : new HashSet<string>(values);
+
+        var valuePanel = new StackPanel { Spacing = 4 };
+        var selectAllCheckBox = new CheckBox
         {
-            Text = _filters.TryGetValue(fieldIndex, out var currentFilter) ? currentFilter : "",
-            MinWidth = 320,
-            PlaceholderText = "Contains text"
+            Content = "(Select All)",
+            IsChecked = selectedValues.Count == values.Count,
+            Margin = new Thickness(0, 0, 0, 6)
+        };
+        valuePanel.Children.Add(selectAllCheckBox);
+
+        var valueCheckBoxes = new List<CheckBox>();
+        foreach (var value in values)
+        {
+            var checkBox = new CheckBox
+            {
+                Content = FormatFilterValue(value),
+                Tag = value,
+                IsChecked = selectedValues.Contains(value)
+            };
+            valueCheckBoxes.Add(checkBox);
+            valuePanel.Children.Add(checkBox);
+        }
+
+        selectAllCheckBox.Click += (_, _) =>
+        {
+            var isChecked = selectAllCheckBox.IsChecked == true;
+            foreach (var checkBox in valueCheckBoxes)
+            {
+                checkBox.IsChecked = isChecked;
+            }
+        };
+
+        foreach (var checkBox in valueCheckBoxes)
+        {
+            checkBox.Click += (_, _) =>
+            {
+                var checkedCount = valueCheckBoxes.Count(item => item.IsChecked == true);
+                selectAllCheckBox.IsChecked = checkedCount == valueCheckBoxes.Count
+                    ? true
+                    : checkedCount == 0
+                        ? false
+                        : null;
+            };
+        }
+
+        var content = new ScrollViewer
+        {
+            Content = valuePanel,
+            MinWidth = 340,
+            MaxHeight = 420,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto
         };
 
         var dialog = new ContentDialog
         {
             Title = $"Filter: {field.DisplayName}",
-            Content = filterInput,
+            Content = content,
             PrimaryButtonText = "Apply",
             SecondaryButtonText = "Clear",
             CloseButtonText = "Cancel",
@@ -516,14 +566,18 @@ public sealed partial class MainWindow : Window
         var result = await dialog.ShowAsync();
         if (result == ContentDialogResult.Primary)
         {
-            var filter = filterInput.Text.Trim();
-            if (filter.Length == 0)
+            var selected = valueCheckBoxes
+                .Where(checkBox => checkBox.IsChecked == true)
+                .Select(checkBox => (string)checkBox.Tag)
+                .ToHashSet();
+
+            if (selected.Count == values.Count)
             {
                 _filters.Remove(fieldIndex);
             }
             else
             {
-                _filters[fieldIndex] = filter;
+                _filters[fieldIndex] = selected;
             }
         }
         else if (result == ContentDialogResult.Secondary)
@@ -560,16 +614,30 @@ public sealed partial class MainWindow : Window
 
     private bool RecordMatchesFilters(FixedRecord record)
     {
-        foreach (var (fieldIndex, filter) in _filters)
+        foreach (var (fieldIndex, selectedValues) in _filters)
         {
             var value = fieldIndex < record.Values.Length ? record.Values[fieldIndex] : "";
-            if (value.IndexOf(filter, StringComparison.CurrentCultureIgnoreCase) < 0)
+            if (!selectedValues.Contains(value))
             {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private List<string> GetDistinctFieldValues(int fieldIndex)
+    {
+        return _records
+            .Select(record => fieldIndex < record.Values.Length ? record.Values[fieldIndex] : "")
+            .Distinct()
+            .OrderBy(value => value, StringComparer.CurrentCulture)
+            .ToList();
+    }
+
+    private static string FormatFilterValue(string value)
+    {
+        return string.IsNullOrEmpty(value) ? "(Blanks)" : value;
     }
 
     private void SetLoadedStatus(string path)
