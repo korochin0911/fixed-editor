@@ -13,13 +13,10 @@ namespace FixedEditor.App;
 
 public sealed partial class MainWindow : Window
 {
-    private const int PageSize = 100;
-
     private readonly FixedLengthFileService _fileService = new();
     private readonly List<FixedRecord> _records = [];
     private FixedFileSchema? _schema;
     private string? _currentFilePath;
-    private int _currentPageIndex;
     private Border? _activeCell;
     private TextBox? _activeEditor;
     private (int RowIndex, int FieldIndex) _activePosition;
@@ -43,7 +40,6 @@ public sealed partial class MainWindow : Window
             _schema = FixedFileSchema.Load(path);
             _records.Clear();
             _currentFilePath = null;
-            _currentPageIndex = 0;
             RenderTable();
             SetStatus($"Loaded schema: {Path.GetFileName(path)}");
         }
@@ -71,7 +67,6 @@ public sealed partial class MainWindow : Window
             _records.Clear();
             _records.AddRange(_fileService.Read(path, _schema!));
             _currentFilePath = path;
-            _currentPageIndex = 0;
             RenderTable();
             SetStatus($"Loaded {_records.Count:N0} records from {Path.GetFileName(path)}.");
         }
@@ -115,31 +110,8 @@ public sealed partial class MainWindow : Window
 
         var values = Enumerable.Repeat("", _schema!.Fields.Count).ToArray();
         _records.Add(new FixedRecord(_records.Count + 1, values));
-        _currentPageIndex = GetLastPageIndex();
         RenderTable();
         SetStatus("Added a blank row.");
-    }
-
-    private void PreviousPageButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_currentPageIndex <= 0)
-        {
-            return;
-        }
-
-        _currentPageIndex--;
-        RenderTable();
-    }
-
-    private void NextPageButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_currentPageIndex >= GetLastPageIndex())
-        {
-            return;
-        }
-
-        _currentPageIndex++;
-        RenderTable();
     }
 
     private async void ValidateButton_Click(object sender, RoutedEventArgs e)
@@ -169,7 +141,6 @@ public sealed partial class MainWindow : Window
         TableGrid.Children.Clear();
         TableGrid.ColumnDefinitions.Clear();
         TableGrid.RowDefinitions.Clear();
-        UpdatePagingControls();
 
         if (_schema is null)
         {
@@ -206,12 +177,9 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _currentPageIndex = Math.Clamp(_currentPageIndex, 0, GetLastPageIndex());
-        var startIndex = _currentPageIndex * PageSize;
-        var endIndex = Math.Min(startIndex + PageSize, _records.Count);
-        for (var rowIndex = startIndex; rowIndex < endIndex; rowIndex++)
+        for (var rowIndex = 0; rowIndex < _records.Count; rowIndex++)
         {
-            var gridRow = rowIndex - startIndex + 1;
+            var gridRow = rowIndex + 1;
             TableGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             AddTableCell(CreateRowNumberCell(_records[rowIndex].LineNumber), gridRow, 0);
 
@@ -377,31 +345,6 @@ public sealed partial class MainWindow : Window
     private static double GetColumnWidth(FixedFieldDefinition field)
     {
         return Math.Clamp(field.Length * 12.0 + 32.0, 120.0, 320.0);
-    }
-
-    private int GetLastPageIndex()
-    {
-        return _records.Count == 0 ? 0 : (_records.Count - 1) / PageSize;
-    }
-
-    private void UpdatePagingControls()
-    {
-        if (_records.Count == 0)
-        {
-            PageStatusText.Text = "";
-            PreviousPageButton.IsEnabled = false;
-            NextPageButton.IsEnabled = false;
-            return;
-        }
-
-        var lastPageIndex = GetLastPageIndex();
-        _currentPageIndex = Math.Clamp(_currentPageIndex, 0, lastPageIndex);
-        var startRecord = _currentPageIndex * PageSize + 1;
-        var endRecord = Math.Min(startRecord + PageSize - 1, _records.Count);
-
-        PageStatusText.Text = $"{startRecord:N0}-{endRecord:N0} / {_records.Count:N0}";
-        PreviousPageButton.IsEnabled = _currentPageIndex > 0;
-        NextPageButton.IsEnabled = _currentPageIndex < lastPageIndex;
     }
 
     private bool EnsureSchema()

@@ -27,14 +27,7 @@
         </ScrollViewer>
 
         <Border Grid.Row="2" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,1,0,0" Padding="12,8">
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <TextBlock x:Name="StatusText" Text="Load a schema to begin." TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button x:Name="PreviousPageButton" Content="Previous" MinWidth="86" Click="PreviousPageButton_Click" IsEnabled="False" />
-                    <TextBlock x:Name="PageStatusText" Text="" MinWidth="120" TextAlignment="Center" VerticalAlignment="Center" />
-                    <Button x:Name="NextPageButton" Content="Next" MinWidth="86" Click="NextPageButton_Click" IsEnabled="False" />
-                </StackPanel>
-            </Grid>
+            <TextBlock x:Name="StatusText" Text="Load a schema to begin." TextTrimming="CharacterEllipsis" />
         </Border>
     </Grid>
 </Window>
