@@ -1,10 +1,13 @@
 using FixedEditor.Core.Models;
 using FixedEditor.Core.Services;
+using FixedEditor.App.Services;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using Windows.Storage.Pickers;
 using Windows.System;
@@ -19,9 +22,12 @@ public sealed partial class MainWindow : Window
     private const int RowBuffer = 4;
 
     private readonly FixedLengthFileService _fileService = new();
+    private readonly SchemaSelectionStore _schemaSelectionStore = new(Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FixedEditor"));
     private readonly List<FixedFileSchema> _schemas = [];
     private readonly List<FixedRecord> _records = [];
     private readonly List<int> _visibleRecordIndexes = [];
+    private readonly List<int> _visibleFieldIndexes = [];
     private readonly List<double> _columnLefts = [];
     private readonly List<double> _columnWidths = [];
     private readonly Dictionary<int, HashSet<string>> _filters = [];
@@ -38,6 +44,24 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         ExtendsContentIntoTitleBar = false;
+        ((FrameworkElement)Content).Loaded += MainWindow_ContentLoaded;
+    }
+
+    private void MainWindow_ContentLoaded(object sender, RoutedEventArgs e)
+    {
+        ((FrameworkElement)Content).Loaded -= MainWindow_ContentLoaded;
+        try
+        {
+            var path = _schemaSelectionStore.GetLastSchemaPath();
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                LoadSchema(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not restore the last schema. Select a schema using Load schema. {ex.Message}");
+        }
     }
 
     private async void LoadSchemaButton_Click(object sender, RoutedEventArgs e)
@@ -50,22 +74,40 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            _schemas.Clear();
-            _schemas.AddRange(FixedFileSchema.LoadAll(path));
-            _schema = _schemas.Count == 1 ? _schemas[0] : null;
-            _records.Clear();
-            _visibleRecordIndexes.Clear();
-            _filters.Clear();
-            _currentFilePath = null;
-            RenderTable();
-            SetStatus(_schemas.Count == 1
-                ? $"Loaded schema: {GetSchemaDisplayName(_schemas[0])}."
-                : $"Loaded {_schemas.Count:N0} schemas from {Path.GetFileName(path)}.");
+            LoadSchema(path);
         }
         catch (Exception ex)
         {
             await ShowErrorAsync("Could not load schema", ex.Message);
+            return;
         }
+
+        try
+        {
+            _schemaSelectionStore.RememberSchemaPath(path);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Schema loaded, but could not remember it for the next launch. {ex.Message}");
+        }
+    }
+
+    private void LoadSchema(string path)
+    {
+        var schemas = FixedFileSchema.LoadAll(path);
+        CommitActiveCellEdit(true);
+        _schemas.Clear();
+        _schemas.AddRange(schemas);
+        _schema = _schemas.Count == 1 ? _schemas[0] : null;
+        ResetVisibleFields();
+        _records.Clear();
+        _visibleRecordIndexes.Clear();
+        _filters.Clear();
+        _currentFilePath = null;
+        RenderTable();
+        SetStatus(_schemas.Count == 1
+            ? $"Loaded schema: {GetSchemaDisplayName(_schemas[0])}."
+            : $"Loaded {_schemas.Count:N0} schemas from {Path.GetFileName(path)}.");
     }
 
     private async void OpenFileButton_Click(object sender, RoutedEventArgs e)
@@ -89,10 +131,16 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            _schema = schema;
+            var records = _fileService.Read(path, schema);
+            CommitActiveCellEdit(true);
+            if (!ReferenceEquals(_schema, schema))
+            {
+                _schema = schema;
+                ResetVisibleFields();
+            }
             _filters.Clear();
             _records.Clear();
-            _records.AddRange(_fileService.Read(path, _schema!));
+            _records.AddRange(records);
             ApplyFilters();
             _currentFilePath = path;
             RenderTable();
@@ -164,8 +212,151 @@ public sealed partial class MainWindow : Window
         await ShowErrorAsync("Validation errors", string.Join(Environment.NewLine, errors));
     }
 
+    private void ResetVisibleFields()
+    {
+        _visibleFieldIndexes.Clear();
+        if (_schema is not null)
+        {
+            _visibleFieldIndexes.AddRange(Enumerable.Range(0, _schema.Fields.Count));
+        }
+    }
+
+    private async void SelectFieldsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_schema is null)
+        {
+            return;
+        }
+
+        CommitActiveCellEdit(true);
+        var fieldPanel = new StackPanel { Spacing = 4 };
+        var fieldCheckBoxes = new List<CheckBox>();
+        for (var fieldIndex = 0; fieldIndex < _schema.Fields.Count; fieldIndex++)
+        {
+            var field = _schema.Fields[fieldIndex];
+            var checkBox = new CheckBox
+            {
+                Content = $"{field.DisplayName} ({field.Name})",
+                Tag = fieldIndex,
+                IsChecked = _visibleFieldIndexes.Contains(fieldIndex)
+            };
+            fieldCheckBoxes.Add(checkBox);
+            fieldPanel.Children.Add(checkBox);
+        }
+
+        var searchBox = new TextBox
+        {
+            Header = "項目名を検索",
+            PlaceholderText = "表示名・項目名の一部を入力"
+        };
+        var searchCompareInfo = CultureInfo.GetCultureInfo("ja-JP").CompareInfo;
+        const CompareOptions searchOptions = CompareOptions.IgnoreCase
+            | CompareOptions.IgnoreWidth | CompareOptions.IgnoreKanaType;
+        var selectAllCheckBox = new CheckBox { Content = "すべて選択" };
+        var selectionSummary = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var noResultsText = new TextBlock
+        {
+            Text = "一致する項目がありません。",
+            Visibility = Visibility.Collapsed
+        };
+        var fieldScrollViewer = new ScrollViewer
+        {
+            Content = fieldPanel,
+            MaxHeight = 360,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(new TextBlock
+        {
+            Text = "表示する項目を1つ以上選択してください。非表示にする項目のフィルターは解除されます。",
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(searchBox);
+        content.Children.Add(selectAllCheckBox);
+        content.Children.Add(selectionSummary);
+        content.Children.Add(noResultsText);
+        content.Children.Add(fieldScrollViewer);
+
+        var dialog = new ContentDialog
+        {
+            Title = "表示項目を選択",
+            Content = content,
+            PrimaryButtonText = "適用",
+            CloseButtonText = "キャンセル",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Content.XamlRoot
+        };
+
+        void UpdateSelectionState()
+        {
+            var selectedCount = fieldCheckBoxes.Count(item => item.IsChecked == true);
+            var matchingCount = fieldCheckBoxes.Count(item => item.Visibility == Visibility.Visible);
+            var matchingSelectedCount = fieldCheckBoxes.Count(item =>
+                item.Visibility == Visibility.Visible && item.IsChecked == true);
+            selectAllCheckBox.IsEnabled = matchingCount > 0;
+            selectAllCheckBox.IsChecked = matchingCount > 0 && matchingSelectedCount == matchingCount
+                ? true
+                : matchingSelectedCount == 0 ? false : null;
+            selectionSummary.Text = $"検索結果: {matchingCount:N0} / {fieldCheckBoxes.Count:N0} 項目（選択: {selectedCount:N0} 項目）";
+            dialog.IsPrimaryButtonEnabled = selectedCount > 0;
+        }
+
+        searchBox.TextChanged += (_, _) =>
+        {
+            var query = searchBox.Text.Trim().Normalize(NormalizationForm.FormKC);
+            foreach (var checkBox in fieldCheckBoxes)
+            {
+                var field = _schema.Fields[(int)checkBox.Tag];
+                var matches = query.Length == 0
+                    || searchCompareInfo.IndexOf(field.DisplayName.Normalize(NormalizationForm.FormKC), query, searchOptions) >= 0
+                    || searchCompareInfo.IndexOf(field.Name.Normalize(NormalizationForm.FormKC), query, searchOptions) >= 0;
+                checkBox.Visibility = matches ? Visibility.Visible : Visibility.Collapsed;
+            }
+            selectAllCheckBox.Content = query.Length == 0 ? "すべて選択" : "検索結果をすべて選択";
+            noResultsText.Visibility = fieldCheckBoxes.Any(item => item.Visibility == Visibility.Visible)
+                ? Visibility.Collapsed : Visibility.Visible;
+            fieldScrollViewer.ChangeView(null, 0, null, true);
+            UpdateSelectionState();
+        };
+
+        selectAllCheckBox.Click += (_, _) =>
+        {
+            var selectAll = selectAllCheckBox.IsChecked == true;
+            foreach (var checkBox in fieldCheckBoxes.Where(item => item.Visibility == Visibility.Visible))
+            {
+                checkBox.IsChecked = selectAll;
+            }
+            UpdateSelectionState();
+        };
+        foreach (var checkBox in fieldCheckBoxes)
+        {
+            checkBox.Click += (_, _) => UpdateSelectionState();
+        }
+        UpdateSelectionState();
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        _visibleFieldIndexes.Clear();
+        _visibleFieldIndexes.AddRange(fieldCheckBoxes
+            .Where(checkBox => checkBox.IsChecked == true)
+            .Select(checkBox => (int)checkBox.Tag));
+        foreach (var fieldIndex in _filters.Keys.Except(_visibleFieldIndexes).ToArray())
+        {
+            _filters.Remove(fieldIndex);
+        }
+        RenderTable();
+        TableScrollViewer.ChangeView(0, null, null, true);
+        HeaderScrollViewer.ChangeView(0, null, null, true);
+        SetStatus($"Showing {_visibleFieldIndexes.Count:N0} of {_schema.Fields.Count:N0} fields and {_visibleRecordIndexes.Count:N0} of {_records.Count:N0} records.");
+    }
+
     private void RenderTable()
     {
+        SelectFieldsButton.IsEnabled = _schema is not null;
         CommitActiveCellEdit(true);
         ApplyFilters();
         ConfigureTableMetrics();
@@ -204,9 +395,9 @@ public sealed partial class MainWindow : Window
         }
 
         AddColumnMetric(RowNumberColumnWidth);
-        foreach (var field in _schema.Fields)
+        foreach (var fieldIndex in _visibleFieldIndexes)
         {
-            AddColumnMetric(GetColumnWidth(field));
+            AddColumnMetric(GetColumnWidth(_schema.Fields[fieldIndex]));
         }
 
         TableCanvas.Width = _tableWidth;
@@ -260,9 +451,10 @@ public sealed partial class MainWindow : Window
             var recordIndex = _visibleRecordIndexes[rowIndex];
             AddCanvasCell(CreateRowNumberCell(_records[recordIndex].LineNumber), gridRow, 0);
 
-            for (var fieldIndex = 0; fieldIndex < _schema.Fields.Count; fieldIndex++)
+            for (var columnIndex = 0; columnIndex < _visibleFieldIndexes.Count; columnIndex++)
             {
-                AddCanvasCell(CreateValueCell(recordIndex, fieldIndex), gridRow, fieldIndex + 1);
+                var fieldIndex = _visibleFieldIndexes[columnIndex];
+                AddCanvasCell(CreateValueCell(recordIndex, fieldIndex), gridRow, columnIndex + 1);
             }
         }
     }
@@ -289,10 +481,11 @@ public sealed partial class MainWindow : Window
         }
 
         AddHeaderCell(CreateHeaderCell("#", HorizontalAlignment.Left), 0);
-        for (var fieldIndex = 0; fieldIndex < _schema.Fields.Count; fieldIndex++)
+        for (var columnIndex = 0; columnIndex < _visibleFieldIndexes.Count; columnIndex++)
         {
+            var fieldIndex = _visibleFieldIndexes[columnIndex];
             var field = _schema.Fields[fieldIndex];
-            AddHeaderCell(CreateHeaderCell($"{field.DisplayName} ({field.Length})", fieldIndex), fieldIndex + 1);
+            AddHeaderCell(CreateHeaderCell($"{field.DisplayName} ({field.Length})", fieldIndex), columnIndex + 1);
         }
     }
 

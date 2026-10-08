@@ -20,6 +20,7 @@
             <AppBarSeparator Height="24" VerticalAlignment="Center" />
             <AppBarButton x:Name="AddRowButton" Style="{StaticResource MainCommandBarButtonStyle}" Icon="Add" Label="Add row" Click="AddRowButton_Click" />
             <AppBarButton x:Name="ValidateButton" Style="{StaticResource MainCommandBarButtonStyle}" Icon="Accept" Label="Validate" Click="ValidateButton_Click" />
+            <AppBarButton x:Name="SelectFieldsButton" Style="{StaticResource MainCommandBarButtonStyle}" Icon="List" Label="表示項目" IsEnabled="False" Click="SelectFieldsButton_Click" />
         </CommandBar>
 
         <Grid Grid.Row="1" RowDefinitions="Auto,*">

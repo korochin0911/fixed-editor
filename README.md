@@ -15,9 +15,19 @@ dotnet build FixedEditor.sln -c Debug
 dotnet run --project FixedEditor.App\FixedEditor.App.csproj
 ```
 
+## Choose displayed fields
+
+After loading a schema (or opening a data file when multiple schemas are loaded), click **表示項目** in the toolbar. Check the fields to display and click **適用**. Use **すべて選択** to select or clear all fields; at least one field must be selected to apply. **キャンセル** leaves the displayed fields unchanged.
+
+Use **項目名を検索** to narrow the list by a partial display name or schema field name. Matching ignores case, character width, and hiragana/katakana differences, and leading/trailing whitespace is trimmed. Clearing the search shows all fields again. Check states are retained while searching, and **検索結果をすべて選択** selects or clears only the matching fields. The dialog shows the matching and total selected counts, and indicates when no fields match.
+
+Columns keep their schema order. Hidden fields retain their data and are included when saving or validating. Filters on fields you hide are cleared. The selection is retained when opening another file with the same schema and resets to all fields when loading a schema or switching to a different schema.
+
 ## Schema
 
 The app reads a JSON schema before opening a data file.
+
+The last successfully loaded schema file is remembered in `%LOCALAPPDATA%\FixedEditor\last-schema-path.txt` and automatically loaded on the next launch, including all definitions in a multi-schema file. Canceling the picker or selecting an invalid schema leaves the remembered path unchanged. If the remembered file cannot be loaded (for example, it was moved or deleted), the app starts normally and asks you to select a schema using **Load schema** in the status bar.
 
 ```json
 {
