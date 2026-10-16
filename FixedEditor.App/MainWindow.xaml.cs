@@ -24,6 +24,8 @@ public sealed partial class MainWindow : Window
     private readonly FixedLengthFileService _fileService = new();
     private readonly SchemaSelectionStore _schemaSelectionStore = new(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FixedEditor"));
+    private readonly VisibleFieldSelectionStore _visibleFieldSelectionStore = new(Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FixedEditor"));
     private readonly List<FixedFileSchema> _schemas = [];
     private readonly List<FixedRecord> _records = [];
     private readonly List<int> _visibleRecordIndexes = [];
@@ -32,6 +34,7 @@ public sealed partial class MainWindow : Window
     private readonly List<double> _columnWidths = [];
     private readonly Dictionary<int, HashSet<string>> _filters = [];
     private FixedFileSchema? _schema;
+    private string? _schemaPath;
     private string? _currentFilePath;
     private double _tableWidth;
     private int _renderedFirstVisibleRow = -1;
@@ -98,8 +101,9 @@ public sealed partial class MainWindow : Window
         CommitActiveCellEdit(true);
         _schemas.Clear();
         _schemas.AddRange(schemas);
+        _schemaPath = Path.GetFullPath(path);
         _schema = _schemas.Count == 1 ? _schemas[0] : null;
-        ResetVisibleFields();
+        RestoreVisibleFields();
         _records.Clear();
         _visibleRecordIndexes.Clear();
         _filters.Clear();
@@ -136,7 +140,7 @@ public sealed partial class MainWindow : Window
             if (!ReferenceEquals(_schema, schema))
             {
                 _schema = schema;
-                ResetVisibleFields();
+                RestoreVisibleFields();
             }
             _filters.Clear();
             _records.Clear();
@@ -212,12 +216,13 @@ public sealed partial class MainWindow : Window
         await ShowErrorAsync("Validation errors", string.Join(Environment.NewLine, errors));
     }
 
-    private void ResetVisibleFields()
+    private void RestoreVisibleFields()
     {
         _visibleFieldIndexes.Clear();
-        if (_schema is not null)
+        if (_schema is not null && _schemaPath is not null)
         {
-            _visibleFieldIndexes.AddRange(Enumerable.Range(0, _schema.Fields.Count));
+            _visibleFieldIndexes.AddRange(_visibleFieldSelectionStore.GetVisibleFieldIndexes(
+                _schemaPath, _schemas.IndexOf(_schema), _schema));
         }
     }
 
@@ -351,7 +356,17 @@ public sealed partial class MainWindow : Window
         RenderTable();
         TableScrollViewer.ChangeView(0, null, null, true);
         HeaderScrollViewer.ChangeView(0, null, null, true);
-        SetStatus($"Showing {_visibleFieldIndexes.Count:N0} of {_schema.Fields.Count:N0} fields and {_visibleRecordIndexes.Count:N0} of {_records.Count:N0} records.");
+        var status = $"Showing {_visibleFieldIndexes.Count:N0} of {_schema.Fields.Count:N0} fields and {_visibleRecordIndexes.Count:N0} of {_records.Count:N0} records.";
+        try
+        {
+            _visibleFieldSelectionStore.RememberVisibleFields(
+                _schemaPath!, _schemas.IndexOf(_schema), _schema, _visibleFieldIndexes);
+        }
+        catch (Exception ex)
+        {
+            status += $" 表示項目の選択を次回起動用に保存できませんでした。{ex.Message}";
+        }
+        SetStatus(status);
     }
 
     private void RenderTable()
